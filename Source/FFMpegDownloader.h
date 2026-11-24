@@ -12,6 +12,8 @@
 @property (nonatomic, strong) NSString *tempName;
 @property (nonatomic, strong) NSString *mediaName;
 @property (nonatomic) NSInteger duration;
+@property (nonatomic) BOOL quiet; // no per-track HUD (used by batch downloads)
+@property (nonatomic, copy) void (^completion)(BOOL success);
 - (void)downloadAudio:(NSString *)audioURL;
 - (void)downloadImage:(NSURL *)link;
 - (void)shareMedia:(NSURL *)mediaURL;

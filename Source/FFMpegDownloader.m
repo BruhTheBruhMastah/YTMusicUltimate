@@ -20,9 +20,11 @@
         [self setActive];
     });
 
-    self.hud = [MBProgressHUD showHUDAddedTo:[UIApplication sharedApplication].keyWindow animated:YES];
-    self.hud.mode = MBProgressHUDModeAnnularDeterminate;
-    self.hud.label.text = LOC(@"DOWNLOADING");
+    if (!self.quiet) {
+        self.hud = [MBProgressHUD showHUDAddedTo:[UIApplication sharedApplication].keyWindow animated:YES];
+        self.hud.mode = MBProgressHUDModeAnnularDeterminate;
+        self.hud.label.text = LOC(@"DOWNLOADING");
+    }
 
     NSURL *documentsURL = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
     NSURL *destinationURL = [documentsURL URLByAppendingPathComponent:[NSString stringWithFormat:@"%@.m4a", self.tempName]];
@@ -41,6 +43,8 @@
 
                 if (isMoved) {
                     [[NSNotificationCenter defaultCenter] postNotificationName:@"ReloadDataNotification" object:nil];
+                }
+                if (isMoved && !self.quiet) {
                     self.hud = [MBProgressHUD showHUDAddedTo:[UIApplication sharedApplication].keyWindow animated:YES];
                     self.hud.mode = MBProgressHUDModeCustomView;
                     self.hud.label.text = LOC(@"DONE");
@@ -52,10 +56,12 @@
 
                     [self.hud hideAnimated:YES afterDelay:3.0];
                 }
+                if (self.completion) self.completion(isMoved);
             } else if (returnCode == RETURN_CODE_CANCEL) {
                 [self.hud hideAnimated:YES];
 
                 [[NSFileManager defaultManager] removeItemAtURL:destinationURL error:nil];
+                if (self.completion) self.completion(NO);
             } else {
                 if (self.hud && self.hud.mode == MBProgressHUDModeAnnularDeterminate) {
                     self.hud.mode = MBProgressHUDModeCustomView;
@@ -71,6 +77,7 @@
                 }
 
                 [[NSFileManager defaultManager] removeItemAtURL:destinationURL error:nil];
+                if (self.completion) self.completion(NO);
             }
         });
     });

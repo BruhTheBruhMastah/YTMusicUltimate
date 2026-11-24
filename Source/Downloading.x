@@ -12,6 +12,7 @@
 #import "Headers/YTIFormatStream.h"
 #import "Headers/YTAlertView.h"
 #import "Headers/ELMNodeController.h"
+#import "PlaylistDownloader.h"
 
 static BOOL YTMU(NSString *key) {
     NSDictionary *YTMUltimateDict = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
@@ -67,6 +68,10 @@ static BOOL YTMU(NSString *key) {
 
         [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:LOC(@"DOWNLOAD_COVER") iconImage:[%c(YTUIResources) outlineImageWithColor:[UIColor whiteColor]] style:0 handler:^ {
             [self downloadCoverImage:playerVC];
+        }]];
+
+        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Download playlist / queue" iconImage:[%c(YTUIResources) downloadOutline] style:0 handler:^ {
+            [[YTMUPlaylistDownloader shared] promptAndStartFromPlayingController:playingVC];
         }]];
 
         [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:LOC(@"DOWNLOAD_PREMIUM") iconImage:[%c(YTUIResources) downloadOutline] secondaryIconImage:[%c(YTUIResources) youtubePremiumBadgeLight] accessibilityIdentifier:nil handler:^ {
