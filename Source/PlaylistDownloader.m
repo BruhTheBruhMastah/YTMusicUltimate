@@ -1,5 +1,6 @@
 #import "PlaylistDownloader.h"
 #import "FFMpegDownloader.h"
+#import "PlaylistStore.h"
 #import "Headers/YTMWatchViewController.h"
 #import "Headers/YTPlayerViewController.h"
 #import "Headers/YTIThumbnailDetails_Thumbnail.h"
@@ -43,6 +44,8 @@ static UIViewController *YTMUTopViewController(UIViewController *vc) {
     __weak YTMNowPlayingViewController *_playingVC;
     NSInteger _total, _index, _saved, _skipped, _failed;
     NSString *_lastManifest;
+    NSString *_playlistName;
+    NSMutableArray<NSString *> *_trackNames; // songs of this run that are on disk, in queue order
     NSMutableSet<NSString *> *_seenIDs;
     BOOL _cancelled;
     MBProgressHUD *_hud;
@@ -63,24 +66,31 @@ static UIViewController *YTMUTopViewController(UIViewController *vc) {
     _playingVC = playingVC;
 
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Download playlist"
-        message:@"Downloads the current track and the next ones in the queue. Enter how many tracks to download (including this one). Audio will play briefly as each track is skipped."
+        message:@"Downloads the current track and the next ones in the queue. Enter how many tracks to download (including this one) and, optionally, a playlist name to group them in the Downloads tab. Turn shuffle off and start from the first track to keep the original order. Audio will play briefly as each track is skipped."
         preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
         field.keyboardType = UIKeyboardTypeNumberPad;
         field.text = [NSString stringWithFormat:@"%ld", (long)kDefaultCount];
+    }];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
+        field.placeholder = @"Playlist name (empty = no playlist)";
+        field.autocapitalizationType = UITextAutocapitalizationTypeSentences;
     }];
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:@"Start" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         NSInteger count = [alert.textFields.firstObject.text integerValue];
         if (count < 1) count = 1;
         if (count > kMaxCount) count = kMaxCount;
-        [self startWithCount:count];
+        NSString *name = [alert.textFields.lastObject.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        [self startWithCount:count playlistName:name];
     }]];
     [YTMUTopViewController(playingVC) presentViewController:alert animated:YES completion:nil];
 }
 
-- (void)startWithCount:(NSInteger)count {
+- (void)startWithCount:(NSInteger)count playlistName:(NSString *)playlistName {
     _running = YES;
+    _playlistName = [playlistName copy];
+    _trackNames = [NSMutableArray array];
     _cancelled = NO;
     _total = count;
     _index = _saved = _skipped = _failed = 0;
@@ -163,6 +173,7 @@ static UIViewController *YTMUTopViewController(UIViewController *vc) {
     NSURL *outputURL = [folder URLByAppendingPathComponent:[NSString stringWithFormat:@"%@.m4a", mediaName]];
     if ([[NSFileManager defaultManager] fileExistsAtPath:outputURL.path]) {
         _skipped++;
+        [self addTrackName:mediaName];
         [self advance];
         return;
     }
@@ -182,6 +193,7 @@ static UIViewController *YTMUTopViewController(UIViewController *vc) {
                 self->_current = nil;
                 if (success) {
                     self->_saved++;
+                    [self addTrackName:mediaName];
                     [self saveCoverFromURL:thumbURL named:mediaName];
                 } else if (!self->_cancelled) {
                     self->_failed++;
@@ -192,6 +204,10 @@ static UIViewController *YTMUTopViewController(UIViewController *vc) {
             [ffmpeg downloadAudio:audioURL];
         });
     });
+}
+
+- (void)addTrackName:(NSString *)name {
+    if (![_trackNames containsObject:name]) [_trackNames addObject:name];
 }
 
 - (void)saveCoverFromURL:(NSString *)urlString named:(NSString *)mediaName {
@@ -211,10 +227,23 @@ static UIViewController *YTMUTopViewController(UIViewController *vc) {
     [_hud hideAnimated:YES];
     _hud = nil;
     _current = nil;
+
+    BOOL savedPlaylist = NO;
+    if (!_cancelled && _playlistName.length && _trackNames.count) {
+        // Cover files are written asynchronously, so give them a moment before picking the playlist cover
+        NSString *name = _playlistName;
+        NSArray<NSString *> *tracks = [_trackNames copy];
+        savedPlaylist = YES;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [YTMUPlaylistStore savePlaylistNamed:name tracks:tracks];
+            [[NSNotificationCenter defaultCenter] postNotificationName:@"ReloadDataNotification" object:nil];
+        });
+    }
     [[NSNotificationCenter defaultCenter] postNotificationName:@"ReloadDataNotification" object:nil];
 
     NSString *summary = [NSString stringWithFormat:@"Saved: %ld\nAlready downloaded: %ld\nFailed: %ld%@",
                          (long)_saved, (long)_skipped, (long)_failed, note.length ? [@"\n\n" stringByAppendingString:note] : @""];
+    if (savedPlaylist) summary = [summary stringByAppendingFormat:@"\n\nPlaylist \"%@\" saved (%lu songs). Find it in the Downloads tab.", _playlistName, (unsigned long)_trackNames.count];
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Playlist download finished" message:summary preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
     UIViewController *root = [UIApplication sharedApplication].keyWindow.rootViewController;

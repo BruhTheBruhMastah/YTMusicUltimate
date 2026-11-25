@@ -1,4 +1,6 @@
 #import "YTMDownloads.h"
+#import "../PlaylistStore.h"
+#import "../PlaylistViewController.h"
 
 @implementation YTMDownloads
 
@@ -67,6 +69,8 @@
 }
 
 - (void)refreshAudioFiles {
+    self.playlists = [YTMUPlaylistStore allPlaylists];
+
     NSURL *documentsURL = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
     NSURL *downloadsURL = [documentsURL URLByAppendingPathComponent:@"YTMusicUltimate"];
 
@@ -90,43 +94,84 @@
 
 #pragma mark - Table view stuff
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    return section == 0 ? @"\n\n" : nil; //Temporary, see YTMTab.x
+    if (section == 0) return self.playlists.count ? @"\n\nPlaylists" : @"\n\n"; //Temporary, see YTMTab.x
+    if (section == 1) return self.playlists.count ? @"Songs" : nil;
+    return nil;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    return section == 1 ? @"\n\n\n" : nil; //Temporary, see YTMTab.x
+    return section == 2 ? @"\n\n\n" : nil; //Temporary, see YTMTab.x
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
-    if (indexPath.section == 1 && self.audioFiles.count == 0) {
+    if (indexPath.section == 2 && self.audioFiles.count == 0) {
         return 0;
     }
     return UITableViewAutomaticDimension;
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 2;
+    return 3;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == 0) {
-        return self.audioFiles.count;
+        return self.playlists.count;
     }
 
     if (section == 1) {
+        return self.audioFiles.count;
+    }
+
+    if (section == 2) {
         return 2;
     }
 
     return 0;
 }
 
+- (UIImage *)roundedThumbnailFromImage:(UIImage *)image {
+    if (!image) return nil;
+    CGFloat targetSize = 37.5;
+    CGFloat scaleFactor = targetSize / MAX(image.size.width, image.size.height);
+    CGSize scaledSize = CGSizeMake(image.size.width * scaleFactor, image.size.height * scaleFactor);
+    UIGraphicsBeginImageContextWithOptions(scaledSize, NO, 0.0);
+    [[UIBezierPath bezierPathWithRoundedRect:CGRectMake(0, 0, scaledSize.width, scaledSize.height) cornerRadius:6] addClip];
+    [image drawInRect:CGRectMake(0, 0, scaledSize.width, scaledSize.height)];
+    UIImage *roundedImage = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    return [roundedImage imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
+}
+
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (indexPath.section == 0) {
+        UITableViewCell *playlistCell = [tableView dequeueReusableCellWithIdentifier:@"playlistCell"];
+        if (playlistCell == nil) {
+            playlistCell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"playlistCell"];
+        }
+
+        NSDictionary *playlist = indexPath.row < self.playlists.count ? self.playlists[indexPath.row] : nil;
+        NSString *coverPath = playlist[@"cover"];
+
+        playlistCell.textLabel.text = playlist[@"name"];
+        playlistCell.textLabel.numberOfLines = 0;
+        playlistCell.textLabel.textColor = [UIColor whiteColor];
+        playlistCell.detailTextLabel.text = [NSString stringWithFormat:@"%lu songs", (unsigned long)[playlist[@"tracks"] count]];
+        playlistCell.detailTextLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.5];
+        playlistCell.backgroundColor = [[UIColor grayColor] colorWithAlphaComponent:0.25];
+        playlistCell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        playlistCell.imageView.image = coverPath.length ? [self roundedThumbnailFromImage:[UIImage imageWithContentsOfFile:coverPath]]
+                                                        : [UIImage systemImageNamed:@"music.note.list"];
+        playlistCell.imageView.tintColor = [UIColor whiteColor];
+        return playlistCell;
+    }
+
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"cell"];
     if (cell == nil) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"cell"];
     }
 
-    if (indexPath.section == 0 && indexPath.row < self.audioFiles.count) {
+    if (indexPath.section == 1 && indexPath.row < self.audioFiles.count) {
         cell.textLabel.text = [self.audioFiles[indexPath.row] stringByDeletingPathExtension];
         cell.textLabel.numberOfLines = 0;
         cell.textLabel.textColor = [UIColor whiteColor];
@@ -148,7 +193,7 @@
         cell.imageView.image = roundedImage;
     }
 
-    else if (indexPath.section == 1) {
+    else if (indexPath.section == 2) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"cell0"];
         NSArray *settingsData = @[
             @{@"title": LOC(@"SHARE_ALL"), @"icon": @"square.and.arrow.up.on.square"},
@@ -170,6 +215,18 @@
 
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
     if (indexPath.section == 0) {
+        UIContextualAction *deletePlaylistAction = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive title:@"" handler:^(UIContextualAction * _Nonnull action, __kindof UIView * _Nonnull sourceView, void (^ _Nonnull completionHandler)(BOOL)) {
+            [self deletePlaylistForIndexPath:indexPath];
+            completionHandler(YES);
+        }];
+        deletePlaylistAction.image = [UIImage systemImageNamed:@"trash"];
+
+        UISwipeActionsConfiguration *playlistConfiguration = [UISwipeActionsConfiguration configurationWithActions:@[deletePlaylistAction]];
+        playlistConfiguration.performsFirstActionWithFullSwipe = NO;
+        return playlistConfiguration;
+    }
+
+    if (indexPath.section == 1) {
         UIContextualAction *shareAction = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"" handler:^(UIContextualAction * _Nonnull action, __kindof UIView * _Nonnull sourceView, void (^ _Nonnull completionHandler)(BOOL)) {
             [self showActivityViewControllerForIndexPath:indexPath];
             completionHandler(YES);
@@ -235,6 +292,7 @@
         [[NSFileManager defaultManager] moveItemAtURL:coverURL toURL:newCoverURL error:&error];
 
         if (!error) {
+            [YTMUPlaylistStore renameTrack:[audioURL.lastPathComponent stringByDeletingPathExtension] to:newName];
             dispatch_async(dispatch_get_main_queue(), ^{
                 [self reloadData];
                 [[NSClassFromString(@"YTMToastController") alloc] showMessage:LOC(@"DONE")];
@@ -252,6 +310,22 @@
     [alertView show];
 }
 
+- (void)deletePlaylistForIndexPath:(NSIndexPath *)indexPath {
+    if (indexPath.row >= self.playlists.count) return;
+    NSDictionary *playlist = self.playlists[indexPath.row];
+
+    YTAlertView *alertView = [NSClassFromString(@"YTAlertView") confirmationDialogWithAction:^{
+        [YTMUPlaylistStore deletePlaylistWithID:playlist[@"id"]];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self reloadData];
+        });
+    }
+    actionTitle:LOC(@"DELETE")];
+    alertView.title = @"YTMusicUltimate";
+    alertView.subtitle = [NSString stringWithFormat:@"Remove the playlist \"%@\"? The downloaded songs are kept.", playlist[@"name"]];
+    [alertView show];
+}
+
 - (void)deleteFileForIndexPath:(NSIndexPath *)indexPath {
     NSURL *documentsURL = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
     NSURL *audioURL = [documentsURL URLByAppendingPathComponent:[NSString stringWithFormat:@"YTMusicUltimate/%@", self.audioFiles[indexPath.row]]];
@@ -265,6 +339,8 @@
             dispatch_async(dispatch_get_main_queue(), ^{
                 [self.audioFiles removeObjectAtIndex:indexPath.row];
                 [self.tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationAutomatic];
+                self.playlists = [YTMUPlaylistStore allPlaylists];
+                [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];
                 [self maybeShowEmptyState];
             });
         }
@@ -281,7 +357,16 @@
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     // Playing song can conflict with YTMusicPlayer
-    if (indexPath.section == 0) {
+    if (indexPath.section == 0 && indexPath.row < self.playlists.count) {
+        NSDictionary *playlist = self.playlists[indexPath.row];
+        YTMUPlaylistViewController *playlistVC = [[YTMUPlaylistViewController alloc] initWithName:playlist[@"name"] tracks:playlist[@"tracks"] startIndex:0];
+        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:playlistVC];
+        nav.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+        nav.modalPresentationStyle = UIModalPresentationFullScreen;
+        [self presentViewController:nav animated:YES completion:nil];
+    }
+
+    if (indexPath.section == 1) {
         NSURL *documentsURL = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
         NSURL *audioURL = [documentsURL URLByAppendingPathComponent:[NSString stringWithFormat:@"YTMusicUltimate/%@", self.audioFiles[indexPath.row]]];
         NSString *imageName = [NSString stringWithFormat:@"%@.png", [self.audioFiles[indexPath.row] stringByDeletingPathExtension]];
@@ -334,7 +419,7 @@
         }];
     }
 
-    if (indexPath.section == 1) {
+    if (indexPath.section == 2) {
         if (indexPath.row == 0) {
             [self shareAll:indexPath];
         }
@@ -371,6 +456,7 @@
 
         if (audiosRemoved) {
             [self.audioFiles removeAllObjects];
+            self.playlists = @[];
             self.imageView.tintColor = [[UIColor whiteColor] colorWithAlphaComponent:0.8];
             self.label.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.8];
             dispatch_async(dispatch_get_main_queue(), ^{
